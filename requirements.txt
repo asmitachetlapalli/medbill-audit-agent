@@ -1,0 +1,7 @@
+langchain
+langgraph
+langchain-google-genai
+pdfplumber
+streamlit
+pandas
+python-dotenv
