@@ -19,23 +19,23 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.prebuilt import create_react_agent
 
 from agent.prompts import REPORT_INSTRUCTIONS, SYSTEM_PROMPT
-from agent.tools.anomaly_detector import find_anomalies
+from agent.tools.anomaly_detector import make_find_anomalies_tool
 from agent.tools.cpt_lookup import lookup_bill
 
 load_dotenv()
 
-TOOLS = [lookup_bill, find_anomalies]
-
-
 DEFAULT_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_OVERCHARGE_RATIO = 1.5
 
 
-@lru_cache(maxsize=4)
-def build_agent(model: str | None = None):
+@lru_cache(maxsize=16)
+def build_agent(model: str | None = None, overcharge_ratio: float = DEFAULT_OVERCHARGE_RATIO):
     """Build and cache the compiled LangGraph audit agent.
 
     `model` overrides the Gemini model name; when None it falls back to the GEMINI_MODEL
-    env var, then DEFAULT_MODEL. Cached per model name so the UI can switch models.
+    env var, then DEFAULT_MODEL. `overcharge_ratio` sets the anomaly tool's sensitivity
+    (multiple of the typical price above which a charge is flagged). Cached per
+    (model, ratio) so the UI can switch either without rebuilding unnecessarily.
     """
     if not os.getenv("GOOGLE_API_KEY"):
         raise RuntimeError(
@@ -50,17 +50,22 @@ def build_agent(model: str | None = None):
         # exponential backoff before surfacing an error to the caller.
         max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "6")),
     )
-    return create_react_agent(llm, TOOLS, prompt=SYSTEM_PROMPT)
+    tools = [lookup_bill, make_find_anomalies_tool(overcharge_ratio)]
+    return create_react_agent(llm, tools, prompt=SYSTEM_PROMPT)
 
 
-def audit_bill(raw_text: str, model: str | None = None) -> str:
+def audit_bill(
+    raw_text: str,
+    model: str | None = None,
+    overcharge_ratio: float = DEFAULT_OVERCHARGE_RATIO,
+) -> str:
     """Run a full audit on a bill's raw text and return the agent's summary.
 
     The agent decides when to call the lookup and anomaly tools; this just kicks it off
     with the bill text and the reporting instructions. `model` optionally overrides the
-    Gemini model name.
+    Gemini model name; `overcharge_ratio` sets the flagging sensitivity.
     """
-    agent = build_agent(model)
+    agent = build_agent(model, overcharge_ratio)
     prompt = (
         "Audit the following medical bill.\n\n"
         f"--- BILL TEXT ---\n{raw_text}\n--- END BILL TEXT ---\n\n"

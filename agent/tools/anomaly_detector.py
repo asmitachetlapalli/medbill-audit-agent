@@ -133,12 +133,28 @@ def detect_anomalies(
     return {"findings": findings, "summary": summary}
 
 
-@tool
-def find_anomalies(line_items: list[dict]) -> dict:
-    """Check enriched bill line items for billing anomalies: overcharges, excess
-    quantities, duplicate charges, and unverifiable codes. Returns findings with
-    severity levels and an estimated total overcharge. Call this after lookup_bill."""
-    return detect_anomalies(line_items)
+def make_find_anomalies_tool(
+    overcharge_ratio: float = _OVERCHARGE_RATIO,
+    high_overcharge_ratio: float = _HIGH_OVERCHARGE_RATIO,
+):
+    """Build a `find_anomalies` agent tool bound to a specific overcharge sensitivity.
+
+    The thresholds are closed over here rather than passed by the LLM, so the UI's
+    sensitivity slider deterministically controls what the agent flags.
+    """
+
+    @tool
+    def find_anomalies(line_items: list[dict]) -> dict:
+        """Check enriched bill line items for billing anomalies: overcharges, excess
+        quantities, duplicate charges, and unverifiable codes. Returns findings with
+        severity levels and an estimated total overcharge. Call this after lookup_bill."""
+        return detect_anomalies(line_items, overcharge_ratio, high_overcharge_ratio)
+
+    return find_anomalies
+
+
+# Default-sensitivity tool instance, for callers that don't customize the threshold.
+find_anomalies = make_find_anomalies_tool()
 
 
 if __name__ == "__main__":

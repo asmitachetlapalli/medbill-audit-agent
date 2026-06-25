@@ -51,11 +51,11 @@ def enrich_line_items(raw_text: str) -> list[dict]:
 
 
 @st.cache_data(show_spinner=True)
-def run_ai_summary(raw_text: str, model: str) -> str:
-    """Run the LLM agent for a plain-language summary (cached per text + model)."""
+def run_ai_summary(raw_text: str, model: str, overcharge_ratio: float) -> str:
+    """Run the LLM agent for a plain-language summary (cached per text/model/ratio)."""
     from agent.graph import audit_bill  # lazy import: app loads even if LLM deps don't
 
-    return audit_bill(raw_text, model=model)
+    return audit_bill(raw_text, model=model, overcharge_ratio=overcharge_ratio)
 
 
 # --------------------------------------------------------------------------- #
@@ -234,18 +234,19 @@ def render_findings_tab(line_items, result):
         st.bar_chart(chart)
 
 
-def render_ai_tab(raw_text, model):
+def render_ai_tab(raw_text, model, ratio):
     if not os.getenv("GOOGLE_API_KEY"):
         st.info(
             "Set GOOGLE_API_KEY (in your environment or a .env file) to enable the "
             "AI-written plain-language summary. The structured audit works without it."
         )
         return
+    st.caption(f"Uses the sidebar settings: model `{model}`, sensitivity {ratio:.1f}×.")
     if not st.button("Generate AI summary", type="primary"):
-        st.caption("Click to run the agent. Results are cached per bill and model.")
+        st.caption("Click to run the agent. Results are cached per bill, model, and sensitivity.")
         return
     try:
-        st.markdown(run_ai_summary(raw_text, model))
+        st.markdown(run_ai_summary(raw_text, model, ratio))
     except Exception as exc:  # noqa: BLE001 - surface any agent/model error to the user
         st.error(f"Could not generate the AI summary: {exc}")
 
@@ -360,7 +361,7 @@ def main() -> None:
                 mime="text/csv",
             )
     with tab_ai:
-        render_ai_tab(raw_text, model)
+        render_ai_tab(raw_text, model, ratio)
     with tab_letter:
         render_letter_tab(line_items, result, meta)
     with tab_text:
