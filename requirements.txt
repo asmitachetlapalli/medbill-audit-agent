@@ -5,3 +5,4 @@ pdfplumber
 streamlit
 pandas
 python-dotenv
+reportlab

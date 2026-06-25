@@ -88,6 +88,27 @@ def parse_line_items(raw_text: str) -> list[dict]:
     return line_items
 
 
+def parse_bill_metadata(raw_text: str) -> dict:
+    """Best-effort extraction of header fields used to pre-fill a dispute letter.
+
+    Returns {patient_name, account_number, date_of_service, provider}. Any field that
+    cannot be found is an empty string. Tuned to the sample bill layout; callers should
+    treat these as editable suggestions, not authoritative.
+    """
+
+    def _find(pattern: str) -> str:
+        m = re.search(pattern, raw_text, re.IGNORECASE)
+        return m.group(1).strip() if m else ""
+
+    return {
+        "patient_name": _find(r"for patient ([A-Za-z .,'-]+?)\."),
+        "account_number": _find(r"for account (\d+)"),
+        # First date of a "MM/DD/YY - MM/DD/YY" service range, or any standalone date.
+        "date_of_service": _find(r"(\d{2}/\d{2}/\d{2,4})\s*-\s*\d{2}/\d{2}/\d{2,4}"),
+        "provider": _find(r"Provider:\s*(.+)"),
+    }
+
+
 def lookup_codes(line_items: list[dict]) -> list[dict]:
     """Enrich each line item with reference data for its billing code.
 

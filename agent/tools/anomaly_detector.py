@@ -22,11 +22,18 @@ _OVERCHARGE_RATIO = 1.5
 _HIGH_OVERCHARGE_RATIO = 3.0
 
 
-def detect_anomalies(line_items: list[dict]) -> dict:
+def detect_anomalies(
+    line_items: list[dict],
+    overcharge_ratio: float = _OVERCHARGE_RATIO,
+    high_overcharge_ratio: float = _HIGH_OVERCHARGE_RATIO,
+) -> dict:
     """Inspect enriched line items and return {findings, summary}.
 
     `line_items` is the output of cpt_lookup.lookup_codes. Each finding is a dict with
     code, type, severity, message, and (where applicable) the estimated overcharge.
+
+    `overcharge_ratio` is the multiple of the typical fair price above which a charge is
+    flagged; `high_overcharge_ratio` is the multiple above which it is high-severity.
     """
     findings: list[dict] = []
     total_overcharge = 0.0
@@ -61,12 +68,12 @@ def detect_anomalies(line_items: list[dict]) -> dict:
         medicare = item["medicare_rate"]
 
         # Overcharge: per-unit charge well above the typical fair price.
-        if typical and per_unit > typical * _OVERCHARGE_RATIO:
+        if typical and per_unit > typical * overcharge_ratio:
             overcharge = (per_unit - typical) * quantity
             total_overcharge += overcharge
             ratio = per_unit / typical
             medicare_mult = (per_unit / medicare) if medicare else None
-            severity = "high" if ratio >= _HIGH_OVERCHARGE_RATIO else "medium"
+            severity = "high" if ratio >= high_overcharge_ratio else "medium"
             msg = (
                 f"Code {code} ('{item['reference_description']}') charged "
                 f"${per_unit:,.2f}/unit vs a typical ${typical:,.2f} "

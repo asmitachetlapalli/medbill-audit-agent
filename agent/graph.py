@@ -27,31 +27,40 @@ load_dotenv()
 TOOLS = [lookup_bill, find_anomalies]
 
 
-@lru_cache(maxsize=1)
-def build_agent():
-    """Build and cache the compiled LangGraph audit agent."""
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
+
+
+@lru_cache(maxsize=4)
+def build_agent(model: str | None = None):
+    """Build and cache the compiled LangGraph audit agent.
+
+    `model` overrides the Gemini model name; when None it falls back to the GEMINI_MODEL
+    env var, then DEFAULT_MODEL. Cached per model name so the UI can switch models.
+    """
     if not os.getenv("GOOGLE_API_KEY"):
         raise RuntimeError(
             "GOOGLE_API_KEY is not set. Add it to your environment or a .env file."
         )
 
-    model = ChatGoogleGenerativeAI(
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite"),
+    model_name = model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+    llm = ChatGoogleGenerativeAI(
+        model=model_name,
         temperature=0,
         # Retry transient failures (e.g. 429 RESOURCE_EXHAUSTED rate limits) with
         # exponential backoff before surfacing an error to the caller.
         max_retries=int(os.getenv("GEMINI_MAX_RETRIES", "6")),
     )
-    return create_react_agent(model, TOOLS, prompt=SYSTEM_PROMPT)
+    return create_react_agent(llm, TOOLS, prompt=SYSTEM_PROMPT)
 
 
-def audit_bill(raw_text: str) -> str:
+def audit_bill(raw_text: str, model: str | None = None) -> str:
     """Run a full audit on a bill's raw text and return the agent's summary.
 
     The agent decides when to call the lookup and anomaly tools; this just kicks it off
-    with the bill text and the reporting instructions.
+    with the bill text and the reporting instructions. `model` optionally overrides the
+    Gemini model name.
     """
-    agent = build_agent()
+    agent = build_agent(model)
     prompt = (
         "Audit the following medical bill.\n\n"
         f"--- BILL TEXT ---\n{raw_text}\n--- END BILL TEXT ---\n\n"
