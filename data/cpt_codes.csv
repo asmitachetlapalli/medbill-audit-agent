@@ -1,0 +1,38 @@
+code,description,category,medicare_rate,typical_charge,max_units_per_day
+99211,Established Patient Office Visit - Minimal,E&M Office Visit,23.45,60.00,1
+99212,Established Patient Office Visit - Straightforward,E&M Office Visit,57.34,120.00,1
+99213,Established Patient Office Visit - Low Complexity,E&M Office Visit,91.76,190.00,1
+99214,Established Patient Office Visit - Moderate Complexity,E&M Office Visit,129.61,265.00,1
+99215,Established Patient Office Visit - High Complexity,E&M Office Visit,182.74,375.00,1
+99202,New Patient Office Visit - Straightforward,E&M Office Visit,73.97,150.00,1
+99203,New Patient Office Visit - Low Complexity,E&M Office Visit,113.75,235.00,1
+99204,New Patient Office Visit - Moderate Complexity,E&M Office Visit,169.93,350.00,1
+99205,New Patient Office Visit - High Complexity,E&M Office Visit,224.36,460.00,1
+99281,Emergency Department Visit - Minor,Emergency,28.02,150.00,1
+99282,Emergency Department Visit - Low,Emergency,55.13,300.00,1
+99283,Emergency Department Visit - Moderate,Emergency,98.42,550.00,1
+99284,Emergency Department Visit - High,Emergency,167.09,900.00,1
+99285,Emergency Department Visit - Critical,Emergency,247.34,1400.00,1
+36415,Routine Venipuncture (Blood Draw),Laboratory,3.00,25.00,2
+80053,Comprehensive Metabolic Panel,Laboratory,10.74,55.00,1
+80061,Lipid Panel,Laboratory,13.05,65.00,1
+85025,Complete Blood Count (CBC) with Differential,Laboratory,7.77,45.00,1
+81001,Urinalysis with Microscopy,Laboratory,3.81,30.00,1
+83036,Hemoglobin A1c,Laboratory,9.42,50.00,1
+71045,Chest X-ray - Single View,Radiology,18.21,120.00,1
+71046,Chest X-ray - Two Views,Radiology,22.34,160.00,1
+73610,X-ray Ankle - Three Views,Radiology,21.50,150.00,1
+74176,CT Abdomen and Pelvis without Contrast,Radiology,153.79,1200.00,1
+70450,CT Head without Contrast,Radiology,98.43,900.00,1
+72148,MRI Lumbar Spine without Contrast,Radiology,222.85,1800.00,1
+93000,Electrocardiogram (ECG) Complete,Cardiology,16.23,90.00,1
+93005,Electrocardiogram (ECG) Tracing Only,Cardiology,8.16,55.00,1
+96372,Therapeutic Injection - Subcutaneous/IM,Procedure,13.18,60.00,4
+96374,IV Push - Single Initial Drug,Procedure,49.41,200.00,1
+96365,IV Infusion - Initial Hour,Procedure,68.42,275.00,1
+J0744,Ciprofloxacin IV - 200mg Injection,Drug/Infusion,11.52,45.00,2
+J1885,Ketorolac Injection - 15mg,Drug/Infusion,1.10,20.00,4
+J2270,Morphine Sulfate Injection - 10mg,Drug/Infusion,1.45,25.00,6
+J3010,Fentanyl Citrate Injection - 0.1mg,Drug/Infusion,0.40,15.00,10
+J1100,Dexamethasone Injection - 1mg,Drug/Infusion,0.40,12.00,16
+J7030,Normal Saline Infusion - 1000cc,Drug/Infusion,1.16,40.00,3
