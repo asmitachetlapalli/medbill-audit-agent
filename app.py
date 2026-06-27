@@ -7,6 +7,7 @@ deterministic tools and works without any API key. The plain-language AI summary
 the Gemini-backed agent and appears only when GOOGLE_API_KEY is configured.
 """
 
+import hmac
 import io
 import os
 import tempfile
@@ -25,7 +26,7 @@ load_dotenv()
 # not a .env file. Bridge them into the environment so the rest of the app — which reads
 # os.getenv — works unchanged. Local .env values (loaded above) take precedence.
 try:
-    for _key in ("GOOGLE_API_KEY", "GEMINI_MODEL", "GEMINI_MAX_RETRIES"):
+    for _key in ("GOOGLE_API_KEY", "GEMINI_MODEL", "GEMINI_MAX_RETRIES", "APP_PASSWORD"):
         if _key in st.secrets and _key not in os.environ:
             os.environ[_key] = str(st.secrets[_key])
 except Exception:  # noqa: BLE001 - no secrets configured (e.g. local .env run) is fine
@@ -324,7 +325,47 @@ def sidebar() -> tuple[str, float]:
     return model, ratio
 
 
+def _check_password(expected: str) -> None:
+    """Callback for the password input: validate, then discard the raw entry."""
+    entered = st.session_state.get("pw_input", "")
+    if hmac.compare_digest(entered, expected):  # constant-time comparison
+        st.session_state["authenticated"] = True
+        st.session_state["pw_error"] = False
+    else:
+        st.session_state["authenticated"] = False
+        st.session_state["pw_error"] = True
+    st.session_state["pw_input"] = ""  # don't keep the password in session state
+
+
+def password_gate() -> bool:
+    """Gate the app behind a password when APP_PASSWORD is configured.
+
+    Returns True if access is allowed. When APP_PASSWORD is not set, access is open
+    (so local dev and the no-key deterministic audit keep working).
+    """
+    expected = os.getenv("APP_PASSWORD")
+    if not expected:
+        return True
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.title("🔒 Medical Bill Auditor")
+    st.text_input(
+        "Enter password to continue",
+        type="password",
+        key="pw_input",
+        on_change=_check_password,
+        args=(expected,),
+    )
+    if st.session_state.get("pw_error"):
+        st.error("Incorrect password.")
+    return False
+
+
 def main() -> None:
+    if not password_gate():
+        st.stop()
+
     model, ratio = sidebar()
 
     st.title("🧾 Medical Bill Auditor")

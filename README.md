@@ -37,6 +37,7 @@ Tested on Python 3.12.
 4. Under **Advanced settings → Secrets**, paste your key (TOML format):
    ```toml
    GOOGLE_API_KEY = "your-api-key-here"
+   APP_PASSWORD = "choose-a-strong-password"  # gate the public app (recommended)
    # GEMINI_MODEL = "gemini-2.5-flash-lite"   # optional
    ```
 5. Deploy. The app reads secrets via `st.secrets` automatically (see `app.py`).
@@ -50,6 +51,7 @@ The structured audit works even if you skip the secret; only the AI Summary tab 
 | `GOOGLE_API_KEY` | — | Required for the AI summary. |
 | `GEMINI_MODEL` | `gemini-2.5-flash-lite` | Gemini model for the agent. |
 | `GEMINI_MAX_RETRIES` | `6` | Retries on transient rate limits. |
+| `APP_PASSWORD` | — | If set, gates the app behind a password. Recommended for public deploys; when unset the app is open. |
 
 Set these via `.env` (local) or Streamlit secrets (deployed).
 
