@@ -21,6 +21,16 @@ from agent.tools.pdf_extractor import extract_bill_text
 
 load_dotenv()
 
+# On Streamlit Community Cloud, secrets come from st.secrets (set in the app dashboard),
+# not a .env file. Bridge them into the environment so the rest of the app — which reads
+# os.getenv — works unchanged. Local .env values (loaded above) take precedence.
+try:
+    for _key in ("GOOGLE_API_KEY", "GEMINI_MODEL", "GEMINI_MAX_RETRIES"):
+        if _key in st.secrets and _key not in os.environ:
+            os.environ[_key] = str(st.secrets[_key])
+except Exception:  # noqa: BLE001 - no secrets configured (e.g. local .env run) is fine
+    pass
+
 st.set_page_config(page_title="Medical Bill Auditor", page_icon="🧾", layout="wide")
 
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2, "ok": 3}
