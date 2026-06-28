@@ -1,8 +1,10 @@
-langchain==1.3.2
-langgraph==1.2.2
-langchain-google-genai==4.2.4
-pdfplumber==0.11.9
-streamlit==1.56.0
-pandas==2.2.3
-python-dotenv==1.2.2
-reportlab==5.0.0
+# Loose ranges so the deploy host can resolve installable wheels for its Python version.
+# Lower bounds are the versions this project was developed/tested against.
+streamlit>=1.40
+pandas>=2.0
+python-dotenv>=1.0
+pdfplumber>=0.11
+reportlab>=4.0,<6
+langchain>=1.3,<2
+langgraph>=1.0,<2
+langchain-google-genai>=4.0,<5
