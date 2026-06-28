@@ -19,6 +19,10 @@ PDF → pdf_extractor → cpt_lookup (parse + price) → anomaly_detector (flag)
 - `agent/graph.py` — LangGraph ReAct agent that orchestrates the tools.
 - `data/cpt_codes.csv` — reference pricing dataset.
 
+A sidebar holds the runtime controls: a **Gemini model picker** and an **overcharge
+sensitivity slider** (the multiple of the typical price above which a charge is flagged).
+The slider drives every view — the findings table, the dispute letter, and the AI summary.
+
 ## Run locally
 
 ```bash
@@ -40,7 +44,9 @@ Tested on Python 3.12.
    APP_PASSWORD = "choose-a-strong-password"  # gate the public app (recommended)
    # GEMINI_MODEL = "gemini-2.5-flash-lite"   # optional
    ```
-5. Deploy. The app reads secrets via `st.secrets` automatically (see `app.py`).
+5. Under **Advanced settings → Python version**, select **3.12** (the version this app
+   is tested on). This avoids dependency-install failures from version-specific wheels.
+6. Deploy. The app reads secrets via `st.secrets` automatically (see `app.py`).
 
 The structured audit works even if you skip the secret; only the AI Summary tab needs it.
 
