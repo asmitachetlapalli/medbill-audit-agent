@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from agent.tools.anomaly_detector import detect_anomalies
 from agent.tools.cpt_lookup import lookup_codes, parse_bill_metadata, parse_line_items
+from agent.tools.dispute_letter import compose_letter
 from agent.tools.pdf_extractor import extract_bill_text
 
 load_dotenv()
@@ -134,61 +135,17 @@ def price_chart_data(line_items: list[dict]) -> pd.DataFrame:
 
 
 def build_dispute_letter(line_items, result, fields: dict) -> str:
-    """Build a dispute letter, filling user-entered fields and listing flagged charges."""
+    """Build a dispute letter from the findings, via the shared letter template."""
     findings = result["findings"]
     total = result["summary"]["total_estimated_overcharge"]
-
-    def val(key, placeholder):
-        return fields.get(key) or placeholder
 
     disputed = []
     for f in findings:
         item = next((li for li in line_items if li["code"] == f["code"]), None)
         charge = f" (charged ${item['charge']:,.2f})" if item else ""
         disputed.append(f"  - Code {f['code']}{charge}: {f['message']}")
-    disputed_block = "\n".join(disputed) if disputed else "  - (none)"
 
-    savings_line = (
-        f"Based on typical and Medicare-allowed rates, I estimate potential overcharges "
-        f"of approximately ${total:,.2f}."
-        if total > 0
-        else "Please provide documentation supporting the charges noted above."
-    )
-
-    return f"""{val('sender_name', '[Your Name]')}
-{val('sender_contact', '[Your Phone / Email]')}
-{val('date', '[Date]')}
-
-Billing Department
-{val('provider', '[Provider / Hospital Name]')}
-
-Re: Dispute of charges on account {val('account_number', '[Account Number]')}
-    Patient: {val('patient_name', '[Patient Name]')}    Date(s) of service: {val('date_of_service', '[Date of Service]')}
-
-To Whom It May Concern:
-
-I am writing to formally dispute the following charges on the above account, which appear
-to be inconsistent with typical and Medicare-allowed rates for these services:
-
-{disputed_block}
-
-{savings_line}
-
-I respectfully request the following:
-  1. A fully itemized bill listing every charge, procedure code, and quantity.
-  2. Written justification for each disputed charge listed above.
-  3. A corrected statement, or an explanation of why the charges are accurate.
-
-Please treat this as a formal request and place a hold on any collection activity for the
-disputed amounts until this matter is resolved.
-
-Sincerely,
-{val('sender_name', '[Your Name]')}
-
----
-Note: This letter is generated from an automated review using estimated reference pricing.
-Flagged items are charges to question with your provider, not proven billing errors.
-"""
+    return compose_letter(disputed, total, fields)
 
 
 def letter_to_pdf(text: str) -> bytes | None:

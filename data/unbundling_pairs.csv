@@ -1,0 +1,12 @@
+code_a,code_b,relationship,note
+80053,80048,includes,Comprehensive Metabolic Panel (80053) already includes the Basic Metabolic Panel (80048); billing both double-charges the shared tests.
+85025,85027,includes,CBC with differential (85025) includes the CBC without differential (85027).
+85025,85004,includes,CBC with differential (85025) includes the automated differential count (85004).
+80061,82465,includes,Lipid panel (80061) includes serum total cholesterol (82465).
+80061,83718,includes,Lipid panel (80061) includes HDL cholesterol (83718).
+80061,84478,includes,Lipid panel (80061) includes triglycerides (84478).
+36415,80053,includes,Routine venipuncture (36415) is generally bundled into lab panel payment and is often not separately billable.
+71046,71045,mutually_exclusive,A two-view chest X-ray (71046) and a single-view chest X-ray (71045) should not both be billed for the same study.
+96365,96374,mutually_exclusive,Only one "initial" infusion service is allowed per encounter; IV infusion initial hour (96365) and IV push initial (96374) cannot both be primary.
+99213,99214,mutually_exclusive,Only one established-patient E&M office-visit level may be billed per encounter.
+99214,99215,mutually_exclusive,Only one established-patient E&M office-visit level may be billed per encounter.

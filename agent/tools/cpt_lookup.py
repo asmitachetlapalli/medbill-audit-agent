@@ -88,6 +88,28 @@ def parse_line_items(raw_text: str) -> list[dict]:
     return line_items
 
 
+def get_code_detail(code: str) -> dict:
+    """Return reference detail for a single billing code, for explaining/reasoning.
+
+    {known, code, description, category, medicare_rate, typical_charge, max_units_per_day}.
+    Unknown codes return {known: False}.
+    """
+    reference = load_reference()
+    code = str(code).strip()
+    if code not in reference.index:
+        return {"code": code, "known": False, "message": "Code not in reference dataset."}
+    row = reference.loc[code]
+    return {
+        "code": code,
+        "known": True,
+        "description": row["description"],
+        "category": row["category"],
+        "medicare_rate": float(row["medicare_rate"]),
+        "typical_charge": float(row["typical_charge"]),
+        "max_units_per_day": int(row["max_units_per_day"]),
+    }
+
+
 def parse_bill_metadata(raw_text: str) -> dict:
     """Best-effort extraction of header fields used to pre-fill a dispute letter.
 
