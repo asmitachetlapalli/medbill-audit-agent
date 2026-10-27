@@ -3,3 +3,5 @@
 __pycache__
 *.pyc
 .streamlit/secrets.toml
+# Large raw downloads (CMS files) stay local; the synthetic bills CSV is committed.
+data/raw/cms_*.csv

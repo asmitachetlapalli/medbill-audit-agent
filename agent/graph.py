@@ -65,13 +65,16 @@ def _get_llm(model_name: str, max_retries: int) -> ChatGoogleGenerativeAI:
     )
 
 
-def make_audit_tools(raw_text: str, overcharge_ratio: float) -> list:
+def make_audit_tools(bill: str | list[dict], overcharge_ratio: float) -> list:
     """Build the agent's toolbox, pre-wired to one bill.
 
-    The bill is parsed once here; each tool closes over the resulting line items, so the
-    agent calls them with no (or tiny) arguments instead of passing data around.
+    `bill` is either the bill's raw text (parsed here) or already-parsed line items
+    ({code, description, quantity, charge}), e.g. a bill loaded from Snowflake. The bill
+    is priced once; each tool closes over the resulting line items, so the agent calls
+    them with no (or tiny) arguments instead of passing data around.
     """
-    line_items = lookup_codes(parse_line_items(raw_text))
+    raw_items = parse_line_items(bill) if isinstance(bill, str) else bill
+    line_items = lookup_codes(raw_items)
     codes = [li["code"] for li in line_items]
 
     # Compact, LLM-friendly view of each line item.
@@ -83,13 +86,15 @@ def make_audit_tools(raw_text: str, overcharge_ratio: float) -> list:
             "charge": li["charge"],
             "typical_charge": li["typical_charge"],
             "medicare_rate": li["medicare_rate"],
+            "cms_allowed_amount": li.get("cms_allowed_amount"),
             "known": li["known"],
         }
 
     @tool
     def get_line_items() -> list[dict]:
-        """List the bill's line items with reference pricing (typical and Medicare rates).
-        Call this first to see what is being audited."""
+        """List the bill's line items with reference pricing (typical and Medicare rates,
+        and the CMS national allowed amount when available). Call this first to see what
+        is being audited."""
         return [_summary(li) for li in line_items]
 
     @tool
@@ -145,11 +150,13 @@ def make_audit_tools(raw_text: str, overcharge_ratio: float) -> list:
 
 
 def audit_bill(
-    raw_text: str,
+    bill: str | list[dict],
     model: str | None = None,
     overcharge_ratio: float = DEFAULT_OVERCHARGE_RATIO,
 ) -> str:
-    """Run an agentic audit on a bill's raw text and return the agent's report.
+    """Run an agentic audit on a bill and return the agent's report.
+
+    `bill` is the bill's raw text or its parsed line items (see make_audit_tools).
 
     The agent investigates using the bill-bound toolbox and decides which tools to call.
     `model` optionally overrides the Gemini model; `overcharge_ratio` sets the flagging
@@ -159,7 +166,7 @@ def audit_bill(
         model or os.getenv("GEMINI_MODEL", DEFAULT_MODEL),
         int(os.getenv("GEMINI_MAX_RETRIES", "6")),
     )
-    tools = make_audit_tools(raw_text, overcharge_ratio)
+    tools = make_audit_tools(bill, overcharge_ratio)
     agent = create_react_agent(llm, tools, prompt=SYSTEM_PROMPT)
     config = {"recursion_limit": _RECURSION_LIMIT}
 

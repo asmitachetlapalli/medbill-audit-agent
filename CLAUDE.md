@@ -18,6 +18,13 @@ All modules are implemented. Most tool files have a `__main__` block that runs t
 - `agent/tools/unbundling.py` — `check_unbundling(codes)`: flags code pairs that shouldn't be billed together, using `data/unbundling_pairs.csv`.
 - `agent/tools/dispute_letter.py` — `compose_letter(disputed_lines, total, fields)`: shared letter template used by both the UI and the agent's draft tool.
 - `agent/tools/pdf_extractor.py` — `extract_bill_text(pdf_path)`.
+- `agent/tools/cms_reference.py` — `clean_cms_file(path)` (raw CMS CSV → national rows), `national_prices()`, `load_cms_reference()` / `get_cms_price(code)` (Snowflake view or local `data/raw/cms_physician_by_geo.csv`; empty if neither).
+- `agent/db.py` — `DATA_SOURCE` switch (`data_source()`, `use_snowflake()`), cached `get_connection()` from `SNOWFLAKE_*` env vars, `query_df()` (lower-cases columns), `write_df()` (write_pandas bulk load).
+- `agent/audit.py` — `audit_line_items(raw_items, ratio)` (deterministic audit: price + anomalies + unbundling) and `findings_to_rows()` (→ AUDIT_RESULTS rows, incl. the `amount_flagged` rules).
+- `agent/bill_store.py` — Snowflake bills I/O: `list_bills()`, `get_line_items(bill_id)`, `get_all_line_items()`, `save_audits(audits, ratio)`.
+- `scripts/` — run as modules from the repo root: `generate_synthetic_bills`, `load_data` (`--dry-run` needs no Snowflake), `run_audits`, `export_for_tableau`.
+- `sql/01_setup.sql` (warehouse, schema, tables, `LATEST_*` and `CMS_REFERENCE_NATIONAL` views) and `sql/02_analysis.sql` (queries delimited by `-- name: <export>` lines, which `export_for_tableau` splits on).
+- `data/raw/synthetic_bills.csv` — 300 synthetic bills (committed; regenerate with the seeded script). `planted_error` marks injected errors.
 - `data/cpt_codes.csv` — reference dataset: `code, description, category, medicare_rate, typical_charge, max_units_per_day`.
 - `data/unbundling_pairs.csv` — `code_a, code_b, relationship, note` (illustrative, not official CMS/NCCI edits).
 
@@ -30,6 +37,8 @@ python -m agent.tools.cpt_lookup       # smoke-test parsing + lookup on the samp
 python -m agent.tools.anomaly_detector # smoke-test anomaly detection on the sample bill
 python -m agent.tools.unbundling       # smoke-test the unbundling rules
 python -m agent.graph                  # run the full agentic audit (needs GOOGLE_API_KEY)
+python -m scripts.load_data --dry-run  # validate bill/CMS parsing without Snowflake
+python -m scripts.load_data            # load into Snowflake (then run_audits, export_for_tableau)
 ```
 
 There is no test suite, linter, or CI configured yet.
@@ -44,6 +53,14 @@ There is no test suite, linter, or CI configured yet.
 - Adding an agent tool: define it inside `make_audit_tools` as a closure over `line_items`/`codes`, give it a clear docstring (the agent reads it), and list it in `SYSTEM_PROMPT`.
 - The bill parser in `cpt_lookup.py` is tuned to the Mayo Clinic itemization layout in `sample_bills/sample.pdf` (date-led rows ending in `<qty> $<amount>`, codes matching `[A-Z]\d{4}` or `\d{5}`). Other bill formats may need the regexes adjusted; the app degrades gracefully when no line items are recognized.
 - `extract_bill_text(pdf_path)` returns `{"raw_text": str, "pages": [{"page_number", "text"}]}`. Its `__main__` block hardcodes an absolute Windows path — use a relative path when generalizing.
+
+## Snowflake data layer
+
+- `DATA_SOURCE=local` (default) must keep working with no Snowflake account or config — import Snowflake code lazily and leave local paths untouched.
+- Reference loaders (`load_reference`, `load_cms_reference`) are `lru_cache`d and pick their source once per process.
+- Line items gain `price_source` (`curated`/`cms`/None), `cms_allowed_amount`, `cms_avg_submitted`. Curated data wins; CMS-only codes are priced from CMS (no unit limit).
+- AUDIT_RESULTS is written only by the deterministic audit (`agent/audit.py`), never by the LLM. `make_audit_tools` / `audit_bill` accept raw text or parsed line items.
+- Analysis reads `LATEST_AUDIT_RUNS` / `LATEST_AUDIT_RESULTS` so re-audits don't double count. Snowflake doesn't enforce PK/FK constraints; loaders truncate-and-reload to stay consistent.
 
 ## LLM configuration (via `.env`, loaded with `python-dotenv`)
 

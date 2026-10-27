@@ -81,6 +81,9 @@ def detect_anomalies(
             )
             if medicare_mult:
                 msg += f" That is {medicare_mult:.0f}x the Medicare rate of ${medicare:,.2f}."
+            cms_allowed = item.get("cms_allowed_amount")
+            if cms_allowed and item.get("price_source") == "curated":
+                msg += f" CMS national average allowed amount: ${cms_allowed:,.2f}."
             findings.append(
                 {
                     "code": code,

@@ -11,7 +11,8 @@ up on anything suspicious, and only draw conclusions the evidence supports.
 
 Your tools (all operate on the bill currently under audit):
   - get_line_items(): list the bill's line items with reference pricing (Medicare rate, \
-typical fair charge). Start here to see what you're auditing.
+typical fair charge, and CMS national allowed amount when available). Start here to see \
+what you're auditing.
   - find_overcharges(): flag overcharges, excess quantities, duplicate charges, and \
 unverifiable codes, with an estimated overcharge per item.
   - check_unbundling(): detect pairs of codes that should not be billed together \

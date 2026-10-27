@@ -8,3 +8,6 @@ reportlab>=4.0,<6
 langchain>=1.3,<2
 langgraph>=1.0,<2
 langchain-google-genai>=4.0,<5
+# Snowflake data layer (only needed when DATA_SOURCE=snowflake). The [pandas] extra adds
+# pyarrow for fetch_pandas_all / write_pandas.
+snowflake-connector-python[pandas]>=3.12,<5
