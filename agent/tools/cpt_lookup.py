@@ -4,7 +4,11 @@ Two responsibilities:
   1. `parse_line_items` turns the raw text from the PDF extractor into structured
      line items (code, description, quantity, charge).
   2. `lookup_codes` enriches each line item with reference data (Medicare rate,
-     typical charge, per-day unit limit) loaded from data/cpt_codes.csv.
+     typical charge, per-day unit limit) from the curated reference set, plus CMS
+     national Medicare pricing when it is available (see cms_reference.py).
+
+The curated reference comes from data/cpt_codes.csv, or from the CPT_REFERENCE table
+when DATA_SOURCE=snowflake.
 
 The `lookup_bill` LangChain tool ties both together so the agent can call it in one step.
 """
@@ -15,6 +19,9 @@ from functools import lru_cache
 
 import pandas as pd
 from langchain_core.tools import tool
+
+from agent.db import query_df, use_snowflake
+from agent.tools.cms_reference import get_cms_price
 
 # data/cpt_codes.csv lives two directories up from this file (agent/tools/ -> repo root).
 _REFERENCE_CSV = os.path.join(
@@ -31,8 +38,11 @@ _QTY_CHARGE = re.compile(r"(\d+)\s+\$([\d,]+\.\d{2})\s*$")
 
 @lru_cache(maxsize=1)
 def load_reference() -> pd.DataFrame:
-    """Load the reference code dataset, indexed by billing code (cached)."""
-    df = pd.read_csv(_REFERENCE_CSV)
+    """Load the curated reference code dataset, indexed by billing code (cached)."""
+    if use_snowflake():
+        df = query_df("SELECT * FROM CPT_REFERENCE")
+    else:
+        df = pd.read_csv(_REFERENCE_CSV)
     df["code"] = df["code"].astype(str).str.strip()
     return df.set_index("code")
 
@@ -96,17 +106,32 @@ def get_code_detail(code: str) -> dict:
     """
     reference = load_reference()
     code = str(code).strip()
+    cms = get_cms_price(code)
     if code not in reference.index:
-        return {"code": code, "known": False, "message": "Code not in reference dataset."}
+        if cms is None:
+            return {"code": code, "known": False, "message": "Code not in reference dataset."}
+        return {
+            "code": code,
+            "known": True,
+            "price_source": "cms",
+            "description": cms["description"],
+            "category": "CMS reference",
+            "medicare_rate": cms["avg_allowed_amount"],
+            "typical_charge": cms["avg_submitted_charge"],
+            "max_units_per_day": None,
+            "cms_allowed_amount": cms["avg_allowed_amount"],
+        }
     row = reference.loc[code]
     return {
         "code": code,
         "known": True,
+        "price_source": "curated",
         "description": row["description"],
         "category": row["category"],
         "medicare_rate": float(row["medicare_rate"]),
         "typical_charge": float(row["typical_charge"]),
         "max_units_per_day": int(row["max_units_per_day"]),
+        "cms_allowed_amount": cms["avg_allowed_amount"] if cms else None,
     }
 
 
@@ -135,8 +160,13 @@ def lookup_codes(line_items: list[dict]) -> list[dict]:
     """Enrich each line item with reference data for its billing code.
 
     Adds: known (bool), reference_description, category, medicare_rate,
-    typical_charge, max_units_per_day. Unknown codes get known=False and null
-    reference fields so the anomaly detector can flag them.
+    typical_charge, max_units_per_day, plus price_source ("curated", "cms", or None)
+    and cms_allowed_amount / cms_avg_submitted (None without CMS data).
+
+    The curated set wins when it has the code. A code only CMS knows is still priced:
+    its CMS average submitted charge stands in as the typical charge and the allowed
+    amount as the Medicare rate (no per-day unit limit). Codes in neither get
+    known=False and null reference fields so the anomaly detector can flag them.
     """
     reference = load_reference()
     enriched: list[dict] = []
@@ -144,15 +174,37 @@ def lookup_codes(line_items: list[dict]) -> list[dict]:
     for item in line_items:
         code = item["code"]
         row = reference.loc[code] if code in reference.index else None
+        cms = get_cms_price(code)
+        cms_fields = {
+            "cms_allowed_amount": cms["avg_allowed_amount"] if cms else None,
+            "cms_avg_submitted": cms["avg_submitted_charge"] if cms else None,
+        }
+        if row is None and cms is not None:
+            enriched.append(
+                {
+                    **item,
+                    "known": True,
+                    "price_source": "cms",
+                    "reference_description": cms["description"],
+                    "category": "CMS reference",
+                    "medicare_rate": cms["avg_allowed_amount"],
+                    "typical_charge": cms["avg_submitted_charge"],
+                    "max_units_per_day": None,
+                    **cms_fields,
+                }
+            )
+            continue
         enriched.append(
             {
                 **item,
                 "known": row is not None,
+                "price_source": None if row is None else "curated",
                 "reference_description": None if row is None else row["description"],
                 "category": None if row is None else row["category"],
                 "medicare_rate": None if row is None else float(row["medicare_rate"]),
                 "typical_charge": None if row is None else float(row["typical_charge"]),
                 "max_units_per_day": None if row is None else int(row["max_units_per_day"]),
+                **cms_fields,
             }
         )
 

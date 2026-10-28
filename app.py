@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
+from agent.db import data_source, use_snowflake
 from agent.tools.anomaly_detector import detect_anomalies
 from agent.tools.cpt_lookup import lookup_codes, parse_bill_metadata, parse_line_items
 from agent.tools.dispute_letter import compose_letter
@@ -27,7 +28,11 @@ load_dotenv()
 # not a .env file. Bridge them into the environment so the rest of the app — which reads
 # os.getenv — works unchanged. Local .env values (loaded above) take precedence.
 try:
-    for _key in ("GOOGLE_API_KEY", "GEMINI_MODEL", "GEMINI_MAX_RETRIES", "APP_PASSWORD"):
+    for _key in (
+        "GOOGLE_API_KEY", "GEMINI_MODEL", "GEMINI_MAX_RETRIES", "APP_PASSWORD",
+        "DATA_SOURCE", "SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD",
+        "SNOWFLAKE_WAREHOUSE", "SNOWFLAKE_DATABASE", "SNOWFLAKE_SCHEMA", "SNOWFLAKE_ROLE",
+    ):
         if _key in st.secrets and _key not in os.environ:
             os.environ[_key] = str(st.secrets[_key])
 except Exception:  # noqa: BLE001 - no secrets configured (e.g. local .env run) is fine
@@ -63,11 +68,29 @@ def enrich_line_items(raw_text: str) -> list[dict]:
 
 
 @st.cache_data(show_spinner=True)
-def run_ai_summary(raw_text: str, model: str, overcharge_ratio: float) -> str:
-    """Run the LLM agent for a plain-language summary (cached per text/model/ratio)."""
+def run_ai_summary(bill: str | list[dict], model: str, overcharge_ratio: float) -> str:
+    """Run the LLM agent for a plain-language summary (cached per bill/model/ratio).
+
+    `bill` is the raw text of an uploaded PDF or the line items of a Snowflake bill.
+    """
     from agent.graph import audit_bill  # lazy import: app loads even if LLM deps don't
 
-    return audit_bill(raw_text, model=model, overcharge_ratio=overcharge_ratio)
+    return audit_bill(bill, model=model, overcharge_ratio=overcharge_ratio)
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def snowflake_bills() -> pd.DataFrame:
+    """Bills stored in Snowflake (refreshed every 5 minutes)."""
+    from agent.bill_store import list_bills
+
+    return list_bills()
+
+
+@st.cache_data(show_spinner=False)
+def snowflake_line_items(bill_id: str) -> list[dict]:
+    from agent.bill_store import get_line_items
+
+    return get_line_items(bill_id)
 
 
 # --------------------------------------------------------------------------- #
@@ -202,7 +225,7 @@ def render_findings_tab(line_items, result):
         st.bar_chart(chart)
 
 
-def render_ai_tab(raw_text, model, ratio):
+def render_ai_tab(bill, model, ratio):
     if not os.getenv("GOOGLE_API_KEY"):
         st.info(
             "Set GOOGLE_API_KEY (in your environment or a .env file) to enable the "
@@ -214,7 +237,7 @@ def render_ai_tab(raw_text, model, ratio):
         st.caption("Click to run the agent. Results are cached per bill, model, and sensitivity.")
         return
     try:
-        st.markdown(run_ai_summary(raw_text, model, ratio))
+        st.markdown(run_ai_summary(bill, model, ratio))
     except Exception as exc:  # noqa: BLE001 - surface any agent/model error to the user
         st.error(f"Could not generate the AI summary: {exc}")
 
@@ -257,6 +280,19 @@ def findings_csv(result: dict) -> str:
     return pd.DataFrame(result["findings"]).to_csv(index=False)
 
 
+def save_findings_to_snowflake(bill_id: str, raw_items: list[dict], ratio: float) -> None:
+    """Re-run the deterministic audit for this bill and record it as a new audit run."""
+    from agent.audit import audit_line_items
+    from agent.bill_store import save_audits
+
+    try:
+        saved = save_audits({bill_id: audit_line_items(raw_items, ratio)}, ratio)
+    except Exception as exc:  # noqa: BLE001 - surface connection/write errors to the user
+        st.error(f"Could not save to Snowflake: {exc}")
+        return
+    st.success(f"Saved {saved['findings']} findings for {bill_id} (run {saved['run_id']}).")
+
+
 # --------------------------------------------------------------------------- #
 # Main.                                                                         #
 # --------------------------------------------------------------------------- #
@@ -279,6 +315,8 @@ def sidebar() -> tuple[str, float]:
             "Lower = stricter (flags more).",
         )
         st.caption(f"Flagging charges above {ratio:.1f}× the typical price.")
+        st.divider()
+        st.caption(f"Data source: **{data_source()}**")
     return model, ratio
 
 
@@ -331,30 +369,62 @@ def main() -> None:
         "billing anomalies — and generate a dispute letter."
     )
 
-    uploaded = st.file_uploader("Upload a medical bill (PDF)", type=["pdf"])
-    if uploaded is None:
-        st.info("Upload a PDF to begin.")
-        st.stop()
+    # In Snowflake mode a bill can also be picked from the BILLS table instead of
+    # uploaded; either way we end up with priced line items and the same audit.
+    bill_id = raw_items = None
+    from_snowflake = use_snowflake() and (
+        st.radio("Bill source", ["Pick a bill from Snowflake", "Upload a PDF"], horizontal=True)
+        == "Pick a bill from Snowflake"
+    )
 
-    with st.spinner("Reading the bill..."):
-        raw_text = extract_text(uploaded.getvalue())
+    if from_snowflake:
+        try:
+            bills = snowflake_bills()
+        except Exception as exc:  # noqa: BLE001 - e.g. bad credentials or setup not run
+            st.error(f"Could not read bills from Snowflake: {exc}")
+            st.stop()
+        if bills.empty:
+            st.info("No bills in Snowflake yet. Run `python -m scripts.load_data` first.")
+            st.stop()
+        labels = {
+            r.bill_id: f"{r.bill_id} · {r.provider if pd.notna(r.provider) else 'Unknown provider'}"
+            f" · {r.service_date}"
+            for r in bills.itertuples()
+        }
+        bill_id = st.selectbox("Bill", list(labels), format_func=labels.get)
+        row = bills.set_index("bill_id").loc[bill_id]
+        raw_items = snowflake_line_items(bill_id)
+        raw_text = None
+        line_items = lookup_codes(raw_items)
+        meta = {
+            "provider": row["provider"] if pd.notna(row["provider"]) else "",
+            "date_of_service": str(row["service_date"]) if pd.notna(row["service_date"]) else "",
+        }
+    else:
+        uploaded = st.file_uploader("Upload a medical bill (PDF)", type=["pdf"])
+        if uploaded is None:
+            st.info("Upload a PDF to begin.")
+            st.stop()
 
-    if not raw_text.strip():
-        st.error("No text could be extracted from this PDF. It may be a scanned image.")
-        st.stop()
+        with st.spinner("Reading the bill..."):
+            raw_text = extract_text(uploaded.getvalue())
 
-    line_items = enrich_line_items(raw_text)
-    if not line_items:
-        st.error(
-            "No billable line items were recognized in this PDF. The bill format may "
-            "not be supported yet."
-        )
-        with st.expander("View extracted text"):
-            st.text(raw_text)
-        st.stop()
+        if not raw_text.strip():
+            st.error("No text could be extracted from this PDF. It may be a scanned image.")
+            st.stop()
+
+        line_items = enrich_line_items(raw_text)
+        if not line_items:
+            st.error(
+                "No billable line items were recognized in this PDF. The bill format may "
+                "not be supported yet."
+            )
+            with st.expander("View extracted text"):
+                st.text(raw_text)
+            st.stop()
+        meta = parse_bill_metadata(raw_text)
 
     result = detect_anomalies(line_items, overcharge_ratio=ratio)
-    meta = parse_bill_metadata(raw_text)
 
     tab_findings, tab_ai, tab_letter, tab_text = st.tabs(
         ["📋 Findings", "🤖 AI Summary", "✉️ Dispute Letter", "📄 Bill Text"]
@@ -368,12 +438,18 @@ def main() -> None:
                 file_name="findings.csv",
                 mime="text/csv",
             )
+        if from_snowflake and st.button("Save findings to Snowflake"):
+            save_findings_to_snowflake(bill_id, raw_items, ratio)
     with tab_ai:
-        render_ai_tab(raw_text, model, ratio)
+        render_ai_tab(raw_items if from_snowflake else raw_text, model, ratio)
     with tab_letter:
         render_letter_tab(line_items, result, meta)
     with tab_text:
-        st.text(raw_text)
+        if raw_text is None:
+            st.caption("This bill was loaded from Snowflake as line items, not PDF text.")
+            st.dataframe(pd.DataFrame(raw_items), use_container_width=True, hide_index=True)
+        else:
+            st.text(raw_text)
 
 
 if __name__ == "__main__":
