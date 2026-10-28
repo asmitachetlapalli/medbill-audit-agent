@@ -135,21 +135,44 @@ CREATE TABLE IF NOT EXISTS AUDIT_RESULTS (
 -- Views
 -- -------------------------------------------------------------------------------------
 
--- One reference price per code: collapse facility/office rows into a service-volume-
--- weighted national average. The agent reads this view in Snowflake mode.
+-- One reference price per code. The agent reads this view in Snowflake mode.
+--
+-- This CMS dataset covers physician billing only. In a facility (F) the hospital's own
+-- fee is paid separately, so facility rows often hold just the professional part — e.g.
+-- the radiologist's reading of a CT, not the scan. Office (O) rows usually include the
+-- whole service, so they are the closer benchmark for a full bill. Rule: use the office
+-- price when it has at least 1,000 services; otherwise (e.g. ED visits, which are almost
+-- never in an office) a service-volume-weighted average across settings. PRICE_BASIS
+-- records which was used. Mirrored in agent/tools/cms_reference.py.
 CREATE OR REPLACE VIEW CMS_REFERENCE_NATIONAL AS
+WITH by_code AS (
+    SELECT
+        HCPCS_CODE,
+        MAX(HCPCS_DESCRIPTION)                                         AS HCPCS_DESCRIPTION,
+        SUM(TOTAL_SERVICES)                                            AS TOTAL_SERVICES,
+        SUM(IFF(PLACE_OF_SERVICE = 'O', TOTAL_SERVICES, 0))            AS OFFICE_SERVICES,
+        -- National data has at most one row per code and setting, so MAX picks it.
+        MAX(IFF(PLACE_OF_SERVICE = 'O', AVG_SUBMITTED_CHARGE, NULL))   AS OFFICE_SUBMITTED,
+        MAX(IFF(PLACE_OF_SERVICE = 'O', AVG_ALLOWED_AMOUNT, NULL))     AS OFFICE_ALLOWED,
+        MAX(IFF(PLACE_OF_SERVICE = 'O', AVG_PAYMENT_AMOUNT, NULL))     AS OFFICE_PAYMENT,
+        SUM(AVG_SUBMITTED_CHARGE * TOTAL_SERVICES) / NULLIF(SUM(TOTAL_SERVICES), 0)
+                                                                       AS ALL_SUBMITTED,
+        SUM(AVG_ALLOWED_AMOUNT * TOTAL_SERVICES) / NULLIF(SUM(TOTAL_SERVICES), 0)
+                                                                       AS ALL_ALLOWED,
+        SUM(AVG_PAYMENT_AMOUNT * TOTAL_SERVICES) / NULLIF(SUM(TOTAL_SERVICES), 0)
+                                                                       AS ALL_PAYMENT
+    FROM CMS_REFERENCE_PRICING
+    GROUP BY HCPCS_CODE
+)
 SELECT
     HCPCS_CODE,
-    MAX(HCPCS_DESCRIPTION)                                                    AS HCPCS_DESCRIPTION,
-    SUM(TOTAL_SERVICES)                                                       AS TOTAL_SERVICES,
-    ROUND(SUM(AVG_SUBMITTED_CHARGE * TOTAL_SERVICES) / NULLIF(SUM(TOTAL_SERVICES), 0), 2)
-                                                                              AS AVG_SUBMITTED_CHARGE,
-    ROUND(SUM(AVG_ALLOWED_AMOUNT * TOTAL_SERVICES) / NULLIF(SUM(TOTAL_SERVICES), 0), 2)
-                                                                              AS AVG_ALLOWED_AMOUNT,
-    ROUND(SUM(AVG_PAYMENT_AMOUNT * TOTAL_SERVICES) / NULLIF(SUM(TOTAL_SERVICES), 0), 2)
-                                                                              AS AVG_PAYMENT_AMOUNT
-FROM CMS_REFERENCE_PRICING
-GROUP BY HCPCS_CODE;
+    HCPCS_DESCRIPTION,
+    TOTAL_SERVICES,
+    IFF(OFFICE_SERVICES >= 1000, 'office', 'all settings')                   AS PRICE_BASIS,
+    ROUND(IFF(OFFICE_SERVICES >= 1000, OFFICE_SUBMITTED, ALL_SUBMITTED), 2)  AS AVG_SUBMITTED_CHARGE,
+    ROUND(IFF(OFFICE_SERVICES >= 1000, OFFICE_ALLOWED, ALL_ALLOWED), 2)      AS AVG_ALLOWED_AMOUNT,
+    ROUND(IFF(OFFICE_SERVICES >= 1000, OFFICE_PAYMENT, ALL_PAYMENT), 2)      AS AVG_PAYMENT_AMOUNT
+FROM by_code;
 
 -- Each bill's most recent audit run. QUALIFY filters on a window function directly,
 -- without a wrapping subquery.

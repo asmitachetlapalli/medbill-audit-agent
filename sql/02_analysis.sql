@@ -74,7 +74,10 @@ ORDER BY SERVICE_MONTH;
 -- name: billed_vs_cms_gap
 -- 3. Billed price vs. the CMS Medicare benchmark, per procedure. MARKUP_VS_MEDICARE is
 --    how many times the Medicare allowed amount the bills charged, per unit.
---    Empty until the CMS file is loaded.
+--    Empty until the CMS file is loaded. CMS_PRICE_BASIS shows whether the benchmark is
+--    the office price or an all-settings average (see CMS_REFERENCE_NATIONAL). The CMS
+--    data covers physician fees only, so for hospital-based services (ED visits, some
+--    imaging) the markup is an upper bound: hospital facility fees aren't in the benchmark.
 WITH billed AS (
     SELECT
         CODE,
@@ -91,6 +94,7 @@ SELECT
     b.LINE_COUNT,
     b.UNITS_BILLED,
     ROUND(b.AVG_BILLED_PER_UNIT, 2)                          AS AVG_BILLED_PER_UNIT,
+    cms.PRICE_BASIS                                          AS CMS_PRICE_BASIS,
     cms.AVG_SUBMITTED_CHARGE                                 AS CMS_AVG_SUBMITTED_CHARGE,
     cms.AVG_ALLOWED_AMOUNT                                   AS CMS_AVG_ALLOWED_AMOUNT,
     ROUND(b.AVG_BILLED_PER_UNIT - cms.AVG_ALLOWED_AMOUNT, 2) AS GAP_PER_UNIT,

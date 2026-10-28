@@ -42,6 +42,8 @@ _COLUMN_MAP = {
     "avg_mdcr_pymt_amt": "avg_payment_amount",
 }
 _REQUIRED = {"hcpcs_code", "total_services", "avg_submitted_charge", "avg_allowed_amount"}
+# Prefer a code's office price when it has at least this many office services.
+_MIN_OFFICE_SERVICES = 1000
 _NUMERIC = (
     "total_providers",
     "total_services",
@@ -95,43 +97,58 @@ def clean_cms_file(path: str) -> pd.DataFrame:
 
 
 def national_prices(rows: pd.DataFrame) -> pd.DataFrame:
-    """Collapse facility/office rows into one service-weighted price per code.
+    """Collapse facility/office rows into one reference price per code.
 
-    Mirrors the CMS_REFERENCE_NATIONAL view in sql/01_setup.sql.
+    Facility rows in this physician dataset often price only the professional part of a
+    service (e.g. reading a CT, not the scan), so the office price is preferred when it
+    has at least _MIN_OFFICE_SERVICES services; otherwise a service-weighted average
+    across settings. `price_basis` says which. Mirrors CMS_REFERENCE_NATIONAL in
+    sql/01_setup.sql.
     """
+    columns = ["hcpcs_description", "price_basis", "avg_submitted_charge", "avg_allowed_amount"]
     if rows.empty:
-        return pd.DataFrame(
-            columns=["hcpcs_description", "avg_submitted_charge", "avg_allowed_amount"]
-        )
+        return pd.DataFrame(columns=columns)
+    code = rows["hcpcs_code"]
     w = rows["total_services"].fillna(0)
+    is_office = (
+        rows["place_of_service"].eq("O")
+        if "place_of_service" in rows
+        else pd.Series(False, index=rows.index)
+    )
 
     def weighted(col: str) -> pd.Series:
-        num = (rows[col] * w).groupby(rows["hcpcs_code"]).sum()
-        den = w.groupby(rows["hcpcs_code"]).sum()
-        return (num / den.where(den > 0)).round(2)
+        num = (rows[col] * w).groupby(code).sum()
+        den = w.groupby(code).sum()
+        return num / den.where(den > 0)
 
-    return pd.DataFrame(
+    def office(col: str) -> pd.Series:
+        return rows[col].where(is_office).groupby(code).max()
+
+    use_office = (w.where(is_office, 0).groupby(code).sum() >= _MIN_OFFICE_SERVICES)
+    out = pd.DataFrame(
         {
-            "hcpcs_description": rows.groupby("hcpcs_code")["hcpcs_description"].first()
+            "hcpcs_description": rows.groupby(code)["hcpcs_description"].first()
             if "hcpcs_description" in rows.columns
             else None,
-            "avg_submitted_charge": weighted("avg_submitted_charge"),
-            "avg_allowed_amount": weighted("avg_allowed_amount"),
+            "price_basis": use_office.map({True: "office", False: "all settings"}),
         }
     )
+    for col in ("avg_submitted_charge", "avg_allowed_amount"):
+        out[col] = office(col).where(use_office, weighted(col)).round(2)
+    return out[columns]
 
 
 @lru_cache(maxsize=1)
 def load_cms_reference() -> pd.DataFrame:
     """One CMS reference price per code, indexed by code (cached).
 
-    Columns: hcpcs_description, avg_submitted_charge, avg_allowed_amount. Empty when no
-    CMS data is available.
+    Columns: hcpcs_description, price_basis, avg_submitted_charge, avg_allowed_amount.
+    Empty when no CMS data is available.
     """
     if use_snowflake():
         df = query_df(
-            "SELECT HCPCS_CODE, HCPCS_DESCRIPTION, AVG_SUBMITTED_CHARGE, AVG_ALLOWED_AMOUNT "
-            "FROM CMS_REFERENCE_NATIONAL"
+            "SELECT HCPCS_CODE, HCPCS_DESCRIPTION, PRICE_BASIS, AVG_SUBMITTED_CHARGE, "
+            "AVG_ALLOWED_AMOUNT FROM CMS_REFERENCE_NATIONAL"
         )
         for col in ("avg_submitted_charge", "avg_allowed_amount"):
             df[col] = pd.to_numeric(df[col], errors="coerce")  # NUMBER arrives as Decimal

@@ -62,7 +62,10 @@ flowchart LR
   few to audit hundreds of bills — and stored findings should not vary run to run.)
 - **CMS benchmark.** Each line item is compared with the CMS national average Medicare
   allowed amount. Codes the curated reference doesn't cover are priced from CMS instead
-  of being flagged as unknown.
+  of being flagged as unknown. The CMS file covers physician fees only — in a hospital,
+  its rows often price just the professional part (e.g. reading a CT, not the scan) — so
+  the office price is used when it's well supported (≥ 1,000 services), and markups for
+  hospital-based services should be read as upper bounds.
 - **Audit history.** Every audit adds an `AUDIT_RUNS` row per bill; the
   `LATEST_AUDIT_RUNS` / `LATEST_AUDIT_RESULTS` views pick each bill's most recent run, so
   re-auditing never double counts.
