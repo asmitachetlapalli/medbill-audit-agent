@@ -5,8 +5,8 @@
   - "snowflake": reference tables, bills, and audit results live in Snowflake.
 
 Credentials are read only from the environment (SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER,
-SNOWFLAKE_PASSWORD, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA, and the
-optional SNOWFLAKE_ROLE) — never hardcoded. The connector is imported lazily so local
+SNOWFLAKE_WAREHOUSE, SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA, the optional SNOWFLAKE_ROLE,
+and either SNOWFLAKE_PRIVATE_KEY_FILE or SNOWFLAKE_PASSWORD) — never hardcoded. The connector is imported lazily so local
 mode works without it installed.
 """
 
@@ -21,7 +21,6 @@ load_dotenv()
 _REQUIRED_VARS = (
     "SNOWFLAKE_ACCOUNT",
     "SNOWFLAKE_USER",
-    "SNOWFLAKE_PASSWORD",
     "SNOWFLAKE_WAREHOUSE",
     "SNOWFLAKE_DATABASE",
     "SNOWFLAKE_SCHEMA",
@@ -44,6 +43,9 @@ def use_snowflake() -> bool:
 def get_connection():
     """Open (once per process) and return a Snowflake connection from env credentials."""
     missing = [v for v in _REQUIRED_VARS if not os.getenv(v)]
+    key_file = os.getenv("SNOWFLAKE_PRIVATE_KEY_FILE")
+    if not key_file and not os.getenv("SNOWFLAKE_PASSWORD"):
+        missing.append("SNOWFLAKE_PASSWORD or SNOWFLAKE_PRIVATE_KEY_FILE")
     if missing:
         raise RuntimeError(
             f"Missing Snowflake settings: {', '.join(missing)}. Add them to your .env file."
@@ -51,11 +53,17 @@ def get_connection():
 
     import snowflake.connector  # lazy: only needed in Snowflake mode
 
+    # Key-pair auth (a private key file) is preferred when set: no MFA prompts or token
+    # expiry. Otherwise a password or a programmatic access token (PAT) both work.
+    auth = (
+        {"private_key_file": os.path.expanduser(key_file)}
+        if key_file
+        else {"password": os.environ["SNOWFLAKE_PASSWORD"]}
+    )
     return snowflake.connector.connect(
         account=os.environ["SNOWFLAKE_ACCOUNT"],
         user=os.environ["SNOWFLAKE_USER"],
-        # A password or a programmatic access token (PAT) both work here.
-        password=os.environ["SNOWFLAKE_PASSWORD"],
+        **auth,
         warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
         database=os.environ["SNOWFLAKE_DATABASE"],
         schema=os.environ["SNOWFLAKE_SCHEMA"],

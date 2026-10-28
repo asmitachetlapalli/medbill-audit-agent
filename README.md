@@ -95,16 +95,24 @@ suspends after 60 seconds idle, plus a 10-credit monthly resource monitor as a s
 2. **Run the setup script.** In Snowsight, open a new SQL worksheet, paste
    `sql/01_setup.sql`, and click **Run All**. It creates the `MEDBILL_WH` warehouse,
    the `MEDBILL_DB.AUDIT` schema, the tables, and the views.
-3. **Get credentials for scripts.** Snowflake requires MFA for password sign-ins, which
-   interrupts scripts. Instead create a programmatic access token in Snowsight (your
-   profile → **Settings → Authentication → Programmatic access tokens**) and use it as
-   `SNOWFLAKE_PASSWORD`.
-4. **Fill in `.env`** (copy `.env.example` if you haven't):
+3. **Set up key-pair login for scripts.** Snowflake requires MFA for password sign-ins,
+   which interrupts scripts, so the scripts sign in with an RSA key instead. Generate one
+   outside the repo:
+   ```bash
+   python -c "import pathlib; from cryptography.hazmat.primitives.asymmetric import rsa; from cryptography.hazmat.primitives import serialization as s; k = rsa.generate_private_key(public_exponent=65537, key_size=2048); p = pathlib.Path.home() / '.snowflake'; p.mkdir(exist_ok=True); (p / 'medbill_rsa_key.p8').write_bytes(k.private_bytes(s.Encoding.PEM, s.PrivateFormat.PKCS8, s.NoEncryption())); print(''.join(k.public_key().public_bytes(s.Encoding.PEM, s.PublicFormat.SubjectPublicKeyInfo).decode().splitlines()[1:-1]))"
+   ```
+   It prints the public key. Register it in a Snowsight worksheet with
+   `ALTER USER "<name>" SET RSA_PUBLIC_KEY='<printed key>';`, using the `name` column
+   from `SHOW USERS`. (A programmatic access token in `SNOWFLAKE_PASSWORD` also works,
+   if your account allows it.)
+4. **Fill in `.env`** (copy `.env.example` if you haven't). `SNOWFLAKE_USER` is your
+   **login name** — the `login_name` column of `SHOW USERS`, often your email address on
+   a trial account — not the shorter user name:
    ```
    DATA_SOURCE=snowflake
-   SNOWFLAKE_ACCOUNT=<account identifier, e.g. abc12345.us-east-1>
-   SNOWFLAKE_USER=<your username>
-   SNOWFLAKE_PASSWORD=<your token>
+   SNOWFLAKE_ACCOUNT=<account identifier, e.g. MYORG-MYACCOUNT>
+   SNOWFLAKE_USER=<your login name>
+   SNOWFLAKE_PRIVATE_KEY_FILE=~/.snowflake/medbill_rsa_key.p8
    SNOWFLAKE_WAREHOUSE=MEDBILL_WH
    SNOWFLAKE_DATABASE=MEDBILL_DB
    SNOWFLAKE_SCHEMA=AUDIT
@@ -178,7 +186,9 @@ The structured audit works even if you skip the secret; only the AI Summary tab 
 | `GEMINI_MAX_RETRIES` | `6` | Retries on transient rate limits. |
 | `APP_PASSWORD` | — | If set, gates the app behind a password. Recommended for public deploys; when unset the app is open. |
 | `DATA_SOURCE` | `local` | `local` (CSV + uploads) or `snowflake`. |
-| `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` | — | Snowflake login (a programmatic access token works as the password). |
+| `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER` | — | Account identifier and login name. |
+| `SNOWFLAKE_PRIVATE_KEY_FILE` | — | Private key for key-pair login (recommended). |
+| `SNOWFLAKE_PASSWORD` | — | Password or programmatic access token, used when no key file is set. |
 | `SNOWFLAKE_WAREHOUSE`, `SNOWFLAKE_DATABASE`, `SNOWFLAKE_SCHEMA` | — | `MEDBILL_WH`, `MEDBILL_DB`, `AUDIT` if you used `sql/01_setup.sql`. |
 | `SNOWFLAKE_ROLE` | user default | Optional role override. |
 

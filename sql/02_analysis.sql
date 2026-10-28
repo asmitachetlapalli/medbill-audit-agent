@@ -137,6 +137,7 @@ ORDER BY OVERALL_RANK;
 -- name: provider_error_rates
 -- 5. Error rates by provider: share of bills with at least one finding, and share of
 --    billed dollars flagged. Providers are ranked by the dollar share (highest risk = 1).
+--    Providers with fewer than 5 audited bills are left out: one bad bill would rank #1.
 WITH bill_findings AS (
     SELECT
         r.BILL_ID,
@@ -158,6 +159,7 @@ provider_stats AS (
     FROM bill_findings bf
     JOIN BILLS b ON b.BILL_ID = bf.BILL_ID
     GROUP BY 1, 2
+    HAVING COUNT(*) >= 5
 ),
 rates AS (
     SELECT
